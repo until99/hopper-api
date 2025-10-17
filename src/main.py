@@ -182,30 +182,20 @@ def create_user(
     return user
 
 
+class IUserUpdate(BaseModel):
+    username: str | None = None
+    email: str | None = None
+    role: str | None = None
+    active: bool | None = None
+
+
 @app.patch("/user/{user_id}")
 def update_user(
     user_id: str,
-    username: str | None = None,
-    email: str | None = None,
-    oldPassword: str | None = None,
-    password: str | None = None,
-    passwordConfirm: str | None = None,
-    role: str | None = None,
+    user_data: IUserUpdate,
     current_user: dict = Depends(verify_token),
 ):
-    update_data = {}
-    if username:
-        update_data["username"] = username
-    if email:
-        update_data["email"] = email
-    if oldPassword:
-        update_data["oldPassword"] = oldPassword
-    if password:
-        update_data["password"] = password
-    if passwordConfirm:
-        update_data["passwordConfirm"] = passwordConfirm
-    if role:
-        update_data["role"] = role
+    update_data = user_data.model_dump(exclude_none=True)
 
     user = requests.patch(
         pocketbase_url + f"/api/collections/auth_users/records/{user_id}",
@@ -377,6 +367,29 @@ def read_report(
     return report.json()
 
 
+@app.delete("/groups/{group_id}/report/{report_id}")
+def delete_report(
+    group_id: str,
+    report_id: str,
+    current_user: dict = Depends(
+        verify_token,
+    ),
+):
+    """Deleta um relatório específico de um grupo do Power BI."""
+    report = requests.delete(
+        f"https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports/{report_id}",
+        headers={
+            "Authorization": f"Bearer {acquire_bearer_token()}",
+        },
+        verify=False,
+    )
+
+    if report.status_code == 200:
+        return {"message": "Report deleted successfully"}
+    else:
+        return {"error": "Failed to delete report"}
+
+
 # Hopper Endpoints
 # Groups
 @app.get("/app/groups/{group_id}")
@@ -428,21 +441,19 @@ def create_hopper_group(
     return group
 
 
+class IGroupUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    active: bool | None = None
+
+
 @app.patch("/app/groups/{group_id}")
 def update_hopper_group(
     group_id: str,
-    name: str | None = None,
-    description: str | None = None,
-    active: bool | None = None,
+    group_data: IGroupUpdate,
     current_user: dict = Depends(verify_token),
 ):
-    update_data = {}
-    if name:
-        update_data["name"] = name
-    if description:
-        update_data["description"] = description
-    if active is not None:
-        update_data["active"] = active
+    update_data = group_data.model_dump(exclude_none=True)
 
     group = requests.patch(
         pocketbase_url + f"/api/collections/groups/records/{group_id}",
