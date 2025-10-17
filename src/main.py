@@ -303,6 +303,45 @@ def logout(
 
 
 # Powerbi Endpoints
+@app.get("/dashboards")
+def read_dashboards(
+    current_user: dict = Depends(verify_token),
+):
+    groups = requests.get(
+        "https://api.powerbi.com/v1.0/myorg/groups",
+        headers={
+            "Authorization": f"Bearer {acquire_bearer_token()}",
+        },
+        verify=False,
+    )
+
+    dashboards = []
+    if groups.status_code == 200:
+        for group in groups.json().get("value", []):
+            dashboards_response = requests.get(
+                f"https://api.powerbi.com/v1.0/myorg/groups/{group['id']}/reports",
+                headers={
+                    "Authorization": f"Bearer {acquire_bearer_token()}",
+                },
+                verify=False,
+            )
+            if dashboards_response.status_code == 200:
+                for report in dashboards_response.json().get("value", []):
+                    dashboards.append(
+                        {
+                            "id": report.get("id"),
+                            "name": report.get("name"),
+                            "datasetId": report.get("datasetId"),
+                            "description": report.get("description"),
+                            "groupId": group.get("id"),
+                        }
+                    )
+            else:
+                return {"error": "Failed to retrieve dashboards"}
+
+    return {"dashboards": dashboards}
+
+
 @app.get("/groups")
 def read_groups(
     current_user: dict = Depends(verify_token),
