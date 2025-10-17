@@ -11,6 +11,7 @@ import requests
 load_dotenv()
 
 app = FastAPI()
+security = HTTPBearer()
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,9 +23,6 @@ app.add_middleware(
 
 pocketbase_url = os.getenv("POCKETBASE_URL", "")
 
-# Security scheme
-security = HTTPBearer()
-
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
     """
@@ -34,7 +32,6 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)) 
     token = credentials.credentials
 
     try:
-        # Valida o token com o PocketBase
         response = requests.post(
             pocketbase_url + "/api/collections/auth_users/auth-refresh",
             headers={
@@ -101,25 +98,19 @@ def read_root():
 
 # User Endpoints
 @app.get("/user/{user_id}")
-def read_user(user_id: str, current_user: dict = Depends(verify_token)):
+def read_user(
+    user_id: str,
+    current_user: dict = Depends(verify_token),
+):
     user = requests.get(
-        pocketbase_url + f"/api/collections/auth_users/records?filter=(id='{user_id}')",
+        pocketbase_url + f"/api/collections/auth_users/records/{user_id}",
         headers={
             "Content-Type": "application/json",
         },
         verify=False,
     ).json()
 
-    data = user["items"][0]
-
-    return {
-        "id": data["id"],
-        "username": data["username"],
-        "email": data["email"],
-        "role": data["role"],
-        "created": data["created"],
-        "updated": data["updated"],
-    }
+    return user
 
 
 @app.get("/users")
@@ -228,7 +219,10 @@ def update_user(
 
 
 @app.delete("/users/{user_id}")
-def delete_user(user_id: str, current_user: dict = Depends(verify_token)):
+def delete_user(
+    user_id: str,
+    current_user: dict = Depends(verify_token),
+):
     response = requests.delete(
         pocketbase_url + f"/api/collections/auth_users/records/{user_id}",
         headers={
@@ -309,7 +303,9 @@ def register(user: IUserAuthRegister):
 
 
 @app.post("/user/logout")
-def logout(current_user: dict = Depends(verify_token)):
+def logout(
+    current_user: dict = Depends(verify_token),
+):
     # O logout pode ser gerenciado no cliente removendo o token
     # No servidor, podemos apenas retornar sucesso
     return {"message": "Logged out"}
@@ -317,7 +313,10 @@ def logout(current_user: dict = Depends(verify_token)):
 
 # Powerbi Endpoints
 @app.get("/groups")
-def read_groups(current_user: dict = Depends(verify_token)):
+def read_groups(
+    current_user: dict = Depends(verify_token),
+):
+    """Retorna a lista de grupos do Power BI."""
     groups = requests.get(
         "https://api.powerbi.com/v1.0/myorg/groups",
         headers={
@@ -333,7 +332,11 @@ def read_groups(current_user: dict = Depends(verify_token)):
 
 
 @app.get("/groups/{group_id}/reports")
-def read_reports(group_id: str, current_user: dict = Depends(verify_token)):
+def read_reports(
+    group_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    """Retorna a lista de relatórios em um grupo específico do Power BI."""
     reports = requests.get(
         f"https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports",
         headers={
@@ -346,6 +349,189 @@ def read_reports(group_id: str, current_user: dict = Depends(verify_token)):
         return {"reports": reports.json().get("value", [])}
     else:
         return {"error": "Failed to retrieve reports"}
+
+
+@app.get("/groups/{group_id}/report/{report_id}")
+def read_report(
+    group_id: str,
+    report_id: str,
+    current_user: dict = Depends(
+        verify_token,
+    ),
+):
+    """Retorna um relatório específico de um grupo do Power BI."""
+    report = requests.get(
+        f"https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports/{report_id}",
+        headers={
+            "Authorization": f"Bearer {acquire_bearer_token()}",
+        },
+        verify=False,
+    )
+
+    # if report.status_code == 200:
+    #     return {"report": report.json()}
+    # else:
+    #     return {"error": "Failed to retrieve report"}
+
+    return report.json()
+
+
+# Hopper Endpoints
+# Groups
+@app.get("/app/groups/{group_id}")
+def read_hopper_group(
+    group_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    group = requests.get(
+        pocketbase_url + f"/api/collections/groups/records/{group_id}",
+        headers={
+            "Content-Type": "application/json",
+        },
+        verify=False,
+    ).json()
+
+    return group
+
+
+@app.get("/app/groups")
+def read_hopper_groups(current_user: dict = Depends(verify_token)):
+    groups = requests.get(
+        pocketbase_url + "/api/collections/groups/records",
+        verify=False,
+    )
+
+    return groups.json()
+
+
+@app.post("/app/groups")
+def create_hopper_group(
+    name: str,
+    description: str,
+    active: bool = True,
+    current_user: dict = Depends(verify_token),
+):
+    group = requests.post(
+        pocketbase_url + "/api/collections/groups/records",
+        headers={
+            "Content-Type": "application/json",
+        },
+        json={
+            "name": name,
+            "description": description,
+            "active": active,
+        },
+        verify=False,
+    ).json()
+
+    return group
+
+
+@app.patch("/app/groups/{group_id}")
+def update_hopper_group(
+    group_id: str,
+    name: str | None = None,
+    description: str | None = None,
+    active: bool | None = None,
+    current_user: dict = Depends(verify_token),
+):
+    update_data = {}
+    if name:
+        update_data["name"] = name
+    if description:
+        update_data["description"] = description
+    if active is not None:
+        update_data["active"] = active
+
+    group = requests.patch(
+        pocketbase_url + f"/api/collections/groups/records/{group_id}",
+        headers={
+            "Content-Type": "application/json",
+        },
+        json=update_data,
+        verify=False,
+    ).json()
+
+    return group
+
+
+@app.delete("/app/groups/{group_id}")
+def delete_hopper_group(
+    group_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    response = requests.delete(
+        pocketbase_url + f"/api/collections/groups/records/{group_id}",
+        headers={
+            "Content-Type": "application/json",
+        },
+        verify=False,
+    )
+
+    if response.status_code == 204:
+        return {"message": "Group deleted successfully"}
+    else:
+        return {"error": "Failed to delete group"}
+
+
+## Users in Group
+@app.get("/app/groups/{group_id}/users")
+def read_hopper_group_users(
+    group_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    group_users = requests.get(
+        pocketbase_url
+        + f"/api/collections/groups_users_dashboards/records?filter=(group_id='{group_id}')&fields=user_id.*",
+        headers={
+            "Content-Type": "application/json",
+        },
+        verify=False,
+    ).json()
+
+    return group_users
+
+
+## Dashboards in Group
+@app.get("/app/groups/{group_id}/dashboards")
+def read_hopper_group_dashboards(
+    group_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    group_dashboards = requests.get(
+        pocketbase_url
+        + f"/api/collections/groups_users_dashboards/records?filter=(group_id='{group_id}')&fields=dashboard_id.*",
+        headers={
+            "Content-Type": "application/json",
+        },
+        verify=False,
+    ).json()
+
+    return group_dashboards
+
+
+## Associate Users/Dashboards to Group
+@app.post("/app/groups/{group_id}/users/{user_id}/dashboards/{dashboard_id}")
+def add_user_to_group(
+    group_id: str,
+    user_id: str,
+    dashboard_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    association = requests.post(
+        pocketbase_url + "/api/collections/groups_users_dashboards/records",
+        headers={
+            "Content-Type": "application/json",
+        },
+        json={
+            "group_id": group_id,
+            "dashboard_id": dashboard_id,
+            "user_id": user_id,
+        },
+        verify=False,
+    ).json()
+
+    return association
 
 
 if __name__ == "__main__":
