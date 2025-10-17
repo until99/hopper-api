@@ -134,6 +134,7 @@ def read_users(
                 "username": user["username"],
                 "email": user["email"],
                 "role": user["role"],
+                "active": user["active"],
                 "created": user["created"],
                 "updated": user["updated"],
             }
@@ -148,7 +149,7 @@ def read_users(
     }
 
 
-@app.post("/users")
+@app.post("/user")
 def create_user(
     username: str,
     email: str,
@@ -181,7 +182,7 @@ def create_user(
     return user
 
 
-@app.patch("/users/{user_id}")
+@app.patch("/user/{user_id}")
 def update_user(
     user_id: str,
     username: str | None = None,
@@ -218,7 +219,7 @@ def update_user(
     return user
 
 
-@app.delete("/users/{user_id}")
+@app.delete("/user/{user_id}")
 def delete_user(
     user_id: str,
     current_user: dict = Depends(verify_token),
