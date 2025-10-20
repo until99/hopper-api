@@ -67,6 +67,7 @@ class IUserAuthRegister(BaseModel):
     email: str = Field(default=..., examples=["user@example.com"])
     password: str = Field(default=..., examples=["securePassword123"])
     confirm_password: str = Field(default=..., examples=["securePassword123"])
+    role: str = Field(default="user", examples=["user", "admin"])
 
 
 def acquire_bearer_token() -> str | None:
@@ -278,6 +279,7 @@ def register(user: IUserAuthRegister):
                 "password": user.password,
                 "passwordConfirm": user.confirm_password,
                 "emailVisibility": True,
+                "role": user.role,
             },
             verify=False,
         )
@@ -334,6 +336,7 @@ def read_dashboards(
                             "datasetId": report.get("datasetId"),
                             "description": report.get("description"),
                             "groupId": group.get("id"),
+                            "groupName": group.get("name"),
                         }
                     )
             else:
@@ -406,10 +409,11 @@ def read_report(
     return report.json()
 
 
-@app.delete("/groups/{group_id}/report/{report_id}")
+@app.delete("/groups/{group_id}/report/{report_id}/dataset/{dataset_id}")
 def delete_report(
     group_id: str,
     report_id: str,
+    dataset_id: str,
     current_user: dict = Depends(
         verify_token,
     ),
@@ -423,8 +427,20 @@ def delete_report(
         verify=False,
     )
 
+    dataset = requests.delete(
+        f"https://api.powerbi.com/v1.0/myorg/groups/{group_id}/datasets/{dataset_id}",
+        headers={
+            "Authorization": f"Bearer {acquire_bearer_token()}",
+        },
+        verify=False,
+    )
+
+    if dataset.status_code != 200:
+        return {"error": "Failed to delete dataset"}
+
     if report.status_code == 200:
         return {"message": "Report deleted successfully"}
+
     else:
         return {"error": "Failed to delete report"}
 
@@ -540,7 +556,18 @@ def read_hopper_group_users(
         verify=False,
     ).json()
 
-    return group_users
+    users = []
+
+    for user in group_users:
+        user_record = user.get("user_id")
+        users.append(user_record)
+
+    users_data = read_users()
+    filtered_users = [
+        user for user in users_data["users"] if user["id"] in [u["id"] for u in users]
+    ]
+
+    return filtered_users
 
 
 ## Dashboards in Group
@@ -558,7 +585,21 @@ def read_hopper_group_dashboards(
         verify=False,
     ).json()
 
-    return group_dashboards
+    dashboards = []
+    for dashboard in group_dashboards.get("items", []):
+        dashboard_record = dashboard.get("dashboard_id")
+        if dashboard_record:
+            dashboards.append(dashboard_record)
+
+    dashboards_data = read_dashboards(current_user)
+    dashboard_ids = [d.get("id") for d in dashboards if isinstance(d, dict)]
+    filtered_dashboards = [
+        dashboard
+        for dashboard in dashboards_data["dashboards"]
+        if isinstance(dashboard, dict) and dashboard.get("id") in dashboard_ids
+    ]
+
+    return filtered_dashboards
 
 
 ## Associate Users/Dashboards to Group
