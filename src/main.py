@@ -173,7 +173,6 @@ def create_user(
             "password": password,
             "passwordConfirm": passwordConfirm,
             "role": role,
-            # config params
             "emailVisibility": True,
             "verify": True,
         },
@@ -549,7 +548,7 @@ def read_hopper_group_users(
 ):
     group_users = requests.get(
         pocketbase_url
-        + f"/api/collections/groups_users_dashboards/records?filter=(group_id='{group_id}')&fields=user_id.*",
+        + f"/api/collections/groups_users/records?filter=(group_id='{group_id}')",
         headers={
             "Content-Type": "application/json",
         },
@@ -557,17 +556,29 @@ def read_hopper_group_users(
     ).json()
 
     users = []
+    for user in group_users["items"]:
+        user_record = requests.get(
+            pocketbase_url + f"/api/collections/auth_users/records/{user['user_id']}",
+            headers={
+                "Content-Type": "application/json",
+            },
+            verify=False,
+        ).json()
 
-    for user in group_users:
-        user_record = user.get("user_id")
-        users.append(user_record)
+        users.append(
+            {
+                "id": user["id"],
+                "user_id": user_record["id"],
+                "username": user_record["username"],
+                "email": user_record["email"],
+                "role": user_record["role"],
+                "active": user_record["active"],
+                "created": user_record["created"],
+                "updated": user_record["updated"],
+            }
+        )
 
-    users_data = read_users()
-    filtered_users = [
-        user for user in users_data["users"] if user["id"] in [u["id"] for u in users]
-    ]
-
-    return filtered_users
+    return users
 
 
 ## Dashboards in Group
@@ -578,52 +589,138 @@ def read_hopper_group_dashboards(
 ):
     group_dashboards = requests.get(
         pocketbase_url
-        + f"/api/collections/groups_users_dashboards/records?filter=(group_id='{group_id}')&fields=dashboard_id.*",
+        + f"/api/collections/groups_dashboards/records?filter=(group_id='{group_id}')",
         headers={
             "Content-Type": "application/json",
         },
         verify=False,
     ).json()
 
-    dashboards = []
-    for dashboard in group_dashboards.get("items", []):
-        dashboard_record = dashboard.get("dashboard_id")
-        if dashboard_record:
-            dashboards.append(dashboard_record)
+    all_dashboards_response = read_dashboards(current_user=current_user)
+    all_dashboards_list: list[dict] = all_dashboards_response.get("dashboards", [])  # type: ignore
 
-    dashboards_data = read_dashboards(current_user)
-    dashboard_ids = [d.get("id") for d in dashboards if isinstance(d, dict)]
-    filtered_dashboards = [
-        dashboard
-        for dashboard in dashboards_data["dashboards"]
-        if isinstance(dashboard, dict) and dashboard.get("id") in dashboard_ids
-    ]
+    dashboards: list[dict] = []
+    for group_dashboard in group_dashboards["items"]:
+        dashboard_id = group_dashboard.get("dashboard_id")
 
-    return filtered_dashboards
+        for dashboard in all_dashboards_list:
+            if dashboard.get("id") == dashboard_id:
+                dashboards.append(dashboard)
+                break
+
+    return dashboards
 
 
 ## Associate Users/Dashboards to Group
-@app.post("/app/groups/{group_id}/users/{user_id}/dashboards/{dashboard_id}")
+@app.post("/app/groups/{group_id}/users/{user_id}")
 def add_user_to_group(
     group_id: str,
     user_id: str,
-    dashboard_id: str,
     current_user: dict = Depends(verify_token),
 ):
     association = requests.post(
-        pocketbase_url + "/api/collections/groups_users_dashboards/records",
+        pocketbase_url + "/api/collections/groups_users/records",
         headers={
             "Content-Type": "application/json",
         },
         json={
             "group_id": group_id,
-            "dashboard_id": dashboard_id,
             "user_id": user_id,
         },
         verify=False,
     ).json()
 
     return association
+
+
+@app.delete("/app/groups/{group_id}/users/{user_id}")
+def remove_user_from_group(
+    user_id: str,
+    group_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    try:
+        group_users = requests.get(
+            pocketbase_url
+            + f"/api/collections/groups_users/records?filter=(group_id='{group_id}')",
+            headers={
+                "Content-Type": "application/json",
+            },
+            verify=False,
+        ).json()
+
+        for group_user in group_users["items"]:
+            if group_user["user_id"] == user_id:
+                response = requests.delete(
+                    pocketbase_url
+                    + f"/api/collections/groups_users/records/{group_user['id']}",
+                    headers={
+                        "Content-Type": "application/json",
+                    },
+                    verify=False,
+                ).json()
+
+                return response
+
+        return group_users
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/app/groups/{group_id}/dashboards/{dashboard_id}")
+def add_dashboard_to_group(
+    group_id: str,
+    dashboard_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    association = requests.post(
+        pocketbase_url + "/api/collections/groups_dashboards/records",
+        headers={
+            "Content-Type": "application/json",
+        },
+        json={
+            "group_id": group_id,
+            "dashboard_id": dashboard_id,
+        },
+        verify=False,
+    ).json()
+
+    return association
+
+
+@app.delete("/app/groups/{group_id}/dashboards/{dashboard_id}")
+def remove_dashboard_from_group(
+    group_id: str,
+    dashboard_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    group_dashboards = requests.get(
+        pocketbase_url
+        + f"/api/collections/groups_dashboards/records?filter=(group_id='{group_id}')AND(dashboard_id='{dashboard_id}')",
+        headers={
+            "Content-Type": "application/json",
+        },
+        verify=False,
+    ).json()
+
+    if group_dashboards["totalItems"] == 0:
+        return {"error": "Dashboard not found in group"}
+
+    association_id = group_dashboards["items"][0]["id"]
+
+    response = requests.delete(
+        pocketbase_url + f"/api/collections/groups_dashboards/records/{association_id}",
+        headers={
+            "Content-Type": "application/json",
+        },
+        verify=False,
+    )
+
+    if response.status_code == 204:
+        return {"message": "Dashboard removed from group successfully"}
+    else:
+        return {"error": "Failed to remove dashboard from group"}
 
 
 if __name__ == "__main__":
