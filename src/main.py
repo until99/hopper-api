@@ -67,6 +67,7 @@ class IUserAuthRegister(BaseModel):
     email: str = Field(default=..., examples=["user@example.com"])
     password: str = Field(default=..., examples=["securePassword123"])
     confirm_password: str = Field(default=..., examples=["securePassword123"])
+    role: str = Field(default="user", examples=["user", "admin"])
 
 
 def acquire_bearer_token() -> str | None:
@@ -134,6 +135,7 @@ def read_users(
                 "username": user["username"],
                 "email": user["email"],
                 "role": user["role"],
+                "active": user["active"],
                 "created": user["created"],
                 "updated": user["updated"],
             }
@@ -148,7 +150,7 @@ def read_users(
     }
 
 
-@app.post("/users")
+@app.post("/user")
 def create_user(
     username: str,
     email: str,
@@ -171,7 +173,6 @@ def create_user(
             "password": password,
             "passwordConfirm": passwordConfirm,
             "role": role,
-            # config params
             "emailVisibility": True,
             "verify": True,
         },
@@ -181,30 +182,20 @@ def create_user(
     return user
 
 
-@app.patch("/users/{user_id}")
+class IUserUpdate(BaseModel):
+    username: str | None = None
+    email: str | None = None
+    role: str | None = None
+    active: bool | None = None
+
+
+@app.patch("/user/{user_id}")
 def update_user(
     user_id: str,
-    username: str | None = None,
-    email: str | None = None,
-    oldPassword: str | None = None,
-    password: str | None = None,
-    passwordConfirm: str | None = None,
-    role: str | None = None,
+    user_data: IUserUpdate,
     current_user: dict = Depends(verify_token),
 ):
-    update_data = {}
-    if username:
-        update_data["username"] = username
-    if email:
-        update_data["email"] = email
-    if oldPassword:
-        update_data["oldPassword"] = oldPassword
-    if password:
-        update_data["password"] = password
-    if passwordConfirm:
-        update_data["passwordConfirm"] = passwordConfirm
-    if role:
-        update_data["role"] = role
+    update_data = user_data.model_dump(exclude_none=True)
 
     user = requests.patch(
         pocketbase_url + f"/api/collections/auth_users/records/{user_id}",
@@ -218,7 +209,7 @@ def update_user(
     return user
 
 
-@app.delete("/users/{user_id}")
+@app.delete("/user/{user_id}")
 def delete_user(
     user_id: str,
     current_user: dict = Depends(verify_token),
@@ -287,6 +278,7 @@ def register(user: IUserAuthRegister):
                 "password": user.password,
                 "passwordConfirm": user.confirm_password,
                 "emailVisibility": True,
+                "role": user.role,
             },
             verify=False,
         )
@@ -312,6 +304,46 @@ def logout(
 
 
 # Powerbi Endpoints
+@app.get("/dashboards")
+def read_dashboards(
+    current_user: dict = Depends(verify_token),
+):
+    groups = requests.get(
+        "https://api.powerbi.com/v1.0/myorg/groups",
+        headers={
+            "Authorization": f"Bearer {acquire_bearer_token()}",
+        },
+        verify=False,
+    )
+
+    dashboards = []
+    if groups.status_code == 200:
+        for group in groups.json().get("value", []):
+            dashboards_response = requests.get(
+                f"https://api.powerbi.com/v1.0/myorg/groups/{group['id']}/reports",
+                headers={
+                    "Authorization": f"Bearer {acquire_bearer_token()}",
+                },
+                verify=False,
+            )
+            if dashboards_response.status_code == 200:
+                for report in dashboards_response.json().get("value", []):
+                    dashboards.append(
+                        {
+                            "id": report.get("id"),
+                            "name": report.get("name"),
+                            "datasetId": report.get("datasetId"),
+                            "description": report.get("description"),
+                            "groupId": group.get("id"),
+                            "groupName": group.get("name"),
+                        }
+                    )
+            else:
+                return {"error": "Failed to retrieve dashboards"}
+
+    return {"dashboards": dashboards}
+
+
 @app.get("/groups")
 def read_groups(
     current_user: dict = Depends(verify_token),
@@ -376,6 +408,42 @@ def read_report(
     return report.json()
 
 
+@app.delete("/groups/{group_id}/report/{report_id}/dataset/{dataset_id}")
+def delete_report(
+    group_id: str,
+    report_id: str,
+    dataset_id: str,
+    current_user: dict = Depends(
+        verify_token,
+    ),
+):
+    """Deleta um relatório específico de um grupo do Power BI."""
+    report = requests.delete(
+        f"https://api.powerbi.com/v1.0/myorg/groups/{group_id}/reports/{report_id}",
+        headers={
+            "Authorization": f"Bearer {acquire_bearer_token()}",
+        },
+        verify=False,
+    )
+
+    dataset = requests.delete(
+        f"https://api.powerbi.com/v1.0/myorg/groups/{group_id}/datasets/{dataset_id}",
+        headers={
+            "Authorization": f"Bearer {acquire_bearer_token()}",
+        },
+        verify=False,
+    )
+
+    if dataset.status_code != 200:
+        return {"error": "Failed to delete dataset"}
+
+    if report.status_code == 200:
+        return {"message": "Report deleted successfully"}
+
+    else:
+        return {"error": "Failed to delete report"}
+
+
 # Hopper Endpoints
 # Groups
 @app.get("/app/groups/{group_id}")
@@ -427,21 +495,19 @@ def create_hopper_group(
     return group
 
 
+class IGroupUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    active: bool | None = None
+
+
 @app.patch("/app/groups/{group_id}")
 def update_hopper_group(
     group_id: str,
-    name: str | None = None,
-    description: str | None = None,
-    active: bool | None = None,
+    group_data: IGroupUpdate,
     current_user: dict = Depends(verify_token),
 ):
-    update_data = {}
-    if name:
-        update_data["name"] = name
-    if description:
-        update_data["description"] = description
-    if active is not None:
-        update_data["active"] = active
+    update_data = group_data.model_dump(exclude_none=True)
 
     group = requests.patch(
         pocketbase_url + f"/api/collections/groups/records/{group_id}",
@@ -482,14 +548,79 @@ def read_hopper_group_users(
 ):
     group_users = requests.get(
         pocketbase_url
-        + f"/api/collections/groups_users_dashboards/records?filter=(group_id='{group_id}')&fields=user_id.*",
+        + f"/api/collections/groups_users/records?filter=(group_id='{group_id}')",
         headers={
             "Content-Type": "application/json",
         },
         verify=False,
     ).json()
 
-    return group_users
+    users = []
+    for user in group_users["items"]:
+        user_record = requests.get(
+            pocketbase_url + f"/api/collections/auth_users/records/{user['user_id']}",
+            headers={
+                "Content-Type": "application/json",
+            },
+            verify=False,
+        ).json()
+
+        users.append(
+            {
+                "id": user["id"],
+                "user_id": user_record["id"],
+                "username": user_record["username"],
+                "email": user_record["email"],
+                "role": user_record["role"],
+                "active": user_record["active"],
+                "created": user_record["created"],
+                "updated": user_record["updated"],
+            }
+        )
+
+    return users
+
+
+@app.get("/app/users/{user_id}/groups")
+def read_user_groups(
+    user_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    """
+    Retorna todos os grupos em que o usuário pertence.
+    """
+    user_groups = requests.get(
+        pocketbase_url
+        + f"/api/collections/groups_users/records?filter=(user_id='{user_id}')",
+        headers={
+            "Content-Type": "application/json",
+        },
+        verify=False,
+    ).json()
+
+    groups = []
+    for user_group in user_groups["items"]:
+        group_record = requests.get(
+            pocketbase_url
+            + f"/api/collections/groups/records/{user_group['group_id']}",
+            headers={
+                "Content-Type": "application/json",
+            },
+            verify=False,
+        ).json()
+
+        groups.append(
+            {
+                "id": group_record["id"],
+                "name": group_record["name"],
+                "description": group_record.get("description", ""),
+                "active": group_record.get("active", True),
+                "created": group_record["created"],
+                "updated": group_record["updated"],
+            }
+        )
+
+    return {"groups": groups, "total": len(groups)}
 
 
 ## Dashboards in Group
@@ -500,38 +631,152 @@ def read_hopper_group_dashboards(
 ):
     group_dashboards = requests.get(
         pocketbase_url
-        + f"/api/collections/groups_users_dashboards/records?filter=(group_id='{group_id}')&fields=dashboard_id.*",
+        + f"/api/collections/groups_dashboards/records?filter=(group_id='{group_id}')",
         headers={
             "Content-Type": "application/json",
         },
         verify=False,
     ).json()
 
-    return group_dashboards
+    all_dashboards_response = read_dashboards(current_user=current_user)
+    all_dashboards_list: list[dict] = all_dashboards_response.get("dashboards", [])  # type: ignore
+
+    dashboards: list[dict] = []
+    for group_dashboard in group_dashboards["items"]:
+        dashboard_id = group_dashboard.get("dashboard_id")
+
+        for dashboard in all_dashboards_list:
+            if dashboard.get("id") == dashboard_id:
+                dashboards.append(dashboard)
+                break
+
+    return dashboards
 
 
 ## Associate Users/Dashboards to Group
-@app.post("/app/groups/{group_id}/users/{user_id}/dashboards/{dashboard_id}")
+@app.post("/app/groups/{group_id}/users/{user_id}")
 def add_user_to_group(
     group_id: str,
     user_id: str,
-    dashboard_id: str,
     current_user: dict = Depends(verify_token),
 ):
     association = requests.post(
-        pocketbase_url + "/api/collections/groups_users_dashboards/records",
+        pocketbase_url + "/api/collections/groups_users/records",
         headers={
             "Content-Type": "application/json",
         },
         json={
             "group_id": group_id,
-            "dashboard_id": dashboard_id,
             "user_id": user_id,
         },
         verify=False,
     ).json()
 
     return association
+
+
+@app.delete("/app/groups/{group_id}/users/{user_id}")
+def remove_user_from_group(
+    user_id: str,
+    group_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    try:
+        group_users = requests.get(
+            pocketbase_url
+            + f"/api/collections/groups_users/records?filter=(group_id='{group_id}')",
+            headers={
+                "Content-Type": "application/json",
+            },
+            verify=False,
+        ).json()
+
+        for group_user in group_users["items"]:
+            if group_user["user_id"] == user_id:
+                response = requests.delete(
+                    pocketbase_url
+                    + f"/api/collections/groups_users/records/{group_user['id']}",
+                    headers={
+                        "Content-Type": "application/json",
+                    },
+                    verify=False,
+                ).json()
+
+                return response
+
+        return group_users
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/app/groups/{group_id}/dashboards/{dashboard_id}")
+def add_dashboard_to_group(
+    group_id: str,
+    dashboard_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    association = requests.post(
+        pocketbase_url + "/api/collections/groups_dashboards/records",
+        headers={
+            "Content-Type": "application/json",
+        },
+        json={
+            "group_id": group_id,
+            "dashboard_id": dashboard_id,
+        },
+        verify=False,
+    ).json()
+
+    return association
+
+
+@app.delete("/app/groups/{group_id}/dashboards/{dashboard_id}")
+def remove_dashboard_from_group(
+    group_id: str,
+    dashboard_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    try:
+        group_dashboards = requests.get(
+            pocketbase_url
+            + f"/api/collections/groups_dashboards/records?filter=(group_id='{group_id}')",
+            headers={
+                "Content-Type": "application/json",
+            },
+            verify=False,
+        ).json()
+
+        if "items" not in group_dashboards:
+            raise HTTPException(
+                status_code=404, detail="No dashboards found for this group"
+            )
+
+        for group_dashboard in group_dashboards["items"]:
+            if group_dashboard.get("dashboard_id") == dashboard_id:
+                response = requests.delete(
+                    pocketbase_url
+                    + f"/api/collections/groups_dashboards/records/{group_dashboard['id']}",
+                    headers={
+                        "Content-Type": "application/json",
+                    },
+                    verify=False,
+                )
+
+                if response.status_code == 204:
+                    return {"message": "Dashboard removed from group successfully"}
+                else:
+                    raise HTTPException(
+                        status_code=response.status_code,
+                        detail="Failed to remove dashboard",
+                    )
+
+        raise HTTPException(status_code=404, detail="Dashboard not found in this group")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 if __name__ == "__main__":
