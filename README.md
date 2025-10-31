@@ -2,7 +2,7 @@
 
 Este é um projeto Python minimalista para uma API.
 
-> **Nota:** Este repositório contém o frontend do projeto Hopper. Os repositórios dos componentes principais estão separados:
+> **Nota:** Este repositório contém o backend do projeto Hopper. Os repositórios dos componentes principais estão separados:
 
 - Frontend (aplicação): https://github.com/until99/hopper-app
 - Hopper (Landing Page): https://github.com/until99/hopper
