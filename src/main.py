@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 import msal
 import requests
+from datetime import datetime, timezone
 
 load_dotenv()
 
@@ -780,8 +781,34 @@ def remove_dashboard_from_group(
 
 
 ## Associate Pipeline to Dashboard/Group
+@app.get("/app/dashboards/pipelines")
+def get_all_pipeline_associations(
+    current_user: dict = Depends(verify_token),
+):
+    try:
+        response = requests.get(
+            pocketbase_url + "/api/collections/pipelines_dashboards/records",
+            headers={
+                "Content-Type": "application/json",
+            },
+            verify=False,
+        ).json()
+
+        if "items" not in response:
+            raise HTTPException(
+                status_code=404, detail="No pipeline associations found"
+            )
+
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
 @app.get("/app/dashboards/{dashboard_id}/pipeline")
-def get_pipeline_association(
+def get_dashboard_pipeline_association(
     dashboard_id: str,
     current_user: dict = Depends(verify_token),
 ):
@@ -808,7 +835,35 @@ def get_pipeline_association(
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
-@app.post("/app/dashboards/{dashboard_id}/pipeline")
+@app.get("/app/dashboards/{pipeline_id}/pipeline")
+def get_pipeline_association(
+    pipeline_id: str,
+    current_user: dict = Depends(verify_token),
+):
+    try:
+        response = requests.get(
+            pocketbase_url
+            + f"/api/collections/pipelines_dashboards/records?filter=pipeline_id='{pipeline_id}'",
+            headers={
+                "Content-Type": "application/json",
+            },
+            verify=False,
+        ).json()
+
+        if "items" not in response:
+            raise HTTPException(
+                status_code=404, detail="No dashboard found for this pipeline"
+            )
+
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@app.post("/app/pipelines/{pipeline_id}/dashboard/{dashboard_id}")
 def create_pipeline_association(
     dashboard_id: str,
     pipeline_id: str,
@@ -895,51 +950,43 @@ def acquire_bearer_airflow_token():
         }
 
 
-@app.post("/app/dashboards/{dashboard_id}/pipeline/refresh")
+@app.post("/app/pipeline/{pipeline_id}/refresh")
 def refresh_pipeline_association(
-    dashboard_id: str,
+    pipeline_id: str,
     current_user: dict = Depends(verify_token),
 ):
     try:
-        response = requests.get(
-            pocketbase_url + "/api/collections/pipelines_dashboards/records",
-            headers={
-                "Content-Type": "application/json",
-            },
-            verify=False,
-        ).json()
-
-        pipeline_id = None
-        if "items" in response:
-            for item in response["items"]:
-                if item.get("dashboard_id") == dashboard_id:
-                    pipeline_id = item.get("pipeline_id")
-                    break
-
-        if pipeline_id:
-            try:
-                requests.post(
-                    f"{os.getenv('AIRFLOW_URL')}/api/v2/dags/{pipeline_id}/dagRuns",
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {acquire_bearer_airflow_token().get('access_token')}",
-                    },
-                    verify=False,
-                )
-
-                return {"message": "Pipeline refreshed successfully"}
-
-            except Exception:
-                raise HTTPException(status_code=500, detail="Error refreshing pipeline")
-        else:
+        airflow_url = os.getenv("AIRFLOW_URL")
+        airflow_token_response = acquire_bearer_airflow_token()
+        access_token = airflow_token_response.get("access_token")
+        if not access_token:
             raise HTTPException(
-                status_code=404, detail="Pipeline not found for this dashboard"
+                status_code=401,
+                detail="Failed to acquire Airflow token",
             )
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        endpoint = f"{airflow_url}/api/v2/dags/{pipeline_id}/dagRuns"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        }
+        payload = {
+            "logical_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        response = requests.post(
+            endpoint,
+            headers=headers,
+            json=payload,
+            verify=False,
+        )
+        if response.status_code not in [200, 201]:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Failed to refresh pipeline: {response.text}",
+            )
+        return {"message": "Pipeline refreshed successfully"}
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error refreshing pipeline")
 
 
 @app.get("/pipelines")
