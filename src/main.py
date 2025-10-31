@@ -610,14 +610,17 @@ def read_user_groups(
             verify=False,
         ).json()
 
+        if "id" not in group_record:
+            continue
+
         groups.append(
             {
                 "id": group_record["id"],
-                "name": group_record["name"],
+                "name": group_record.get("name", ""),
                 "description": group_record.get("description", ""),
                 "active": group_record.get("active", True),
-                "created": group_record["created"],
-                "updated": group_record["updated"],
+                "created": group_record.get("created", ""),
+                "updated": group_record.get("updated", ""),
             }
         )
 
