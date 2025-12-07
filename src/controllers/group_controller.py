@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from models.group import IGroupUpdate
 from services.group_service import GroupService
 from services.user_service import UserService
