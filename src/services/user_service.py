@@ -27,13 +27,13 @@ class UserService:
         for user in users["items"]:
             result.append(
                 {
-                    "id": user["id"],
-                    "username": user["username"],
-                    "email": user["email"],
-                    "role": user["role"],
-                    "active": user["active"],
-                    "created": user["created"],
-                    "updated": user["updated"],
+                    "id": user.get("id", ""),
+                    "username": user.get("username", ""),
+                    "email": user.get("email", ""),
+                    "role": user.get("role", ""),
+                    "active": user.get("active", False),
+                    "created": user.get("created", ""),
+                    "updated": user.get("updated", ""),
                 }
             )
 
