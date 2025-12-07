@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
-from src.services.airflow_service import AirflowService
-from src.middlewares.auth import verify_token
+from services.airflow_service import AirflowService
+from middlewares.auth import verify_token
 
 router = APIRouter(tags=["Pipelines"])
 

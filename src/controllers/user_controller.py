@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
-from src.models.user import IUserUpdate
-from src.services.user_service import UserService
-from src.middlewares.auth import verify_token
+from models.user import IUserUpdate
+from services.user_service import UserService
+from middlewares.auth import verify_token
 
 router = APIRouter(prefix="/user", tags=["Users"])
 

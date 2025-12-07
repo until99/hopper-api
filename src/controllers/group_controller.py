@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends
-from src.models.group import IGroupUpdate
-from src.services.group_service import GroupService
-from src.services.user_service import UserService
-from src.services.powerbi_service import PowerBIService
-from src.middlewares.auth import verify_token
+from fastapi import APIRouter
+from models.group import IGroupUpdate
+from services.group_service import GroupService
+from services.user_service import UserService
+from services.powerbi_service import PowerBIService
+from middlewares.auth import verify_token
 
 router = APIRouter(prefix="/app", tags=["Groups"])
 

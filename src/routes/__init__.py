@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from src.controllers import (
+from controllers import (
     auth_router,
     user_router,
     group_router,

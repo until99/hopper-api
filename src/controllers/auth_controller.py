@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
-from src.models.user import IUserAuthLogin, IUserAuthRegister
-from src.services.auth_service import AuthService
-from src.middlewares.auth import verify_token
+from models.user import IUserAuthLogin, IUserAuthRegister
+from services.auth_service import AuthService
+from middlewares.auth import verify_token
 
 router = APIRouter(prefix="/user", tags=["Authentication"])
 

@@ -1,7 +1,7 @@
 import requests
 from datetime import datetime, timezone
 from fastapi import HTTPException
-from src.config import settings
+from config import settings
 
 
 class AirflowService:

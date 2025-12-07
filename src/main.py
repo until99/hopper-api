@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
-from src.config import settings
-from src.routes import setup_routes
+from config import settings
+from routes import setup_routes
 
 app = FastAPI(title="Hopper API", version="1.0.0")
 

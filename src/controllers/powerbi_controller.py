@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
-from src.services.powerbi_service import PowerBIService
-from src.middlewares.auth import verify_token
+from services.powerbi_service import PowerBIService
+from middlewares.auth import verify_token
 
 router = APIRouter(tags=["Power BI"])
 

@@ -1,6 +1,6 @@
 import msal
 import requests
-from src.config import settings
+from config import settings
 
 
 class PowerBIService:

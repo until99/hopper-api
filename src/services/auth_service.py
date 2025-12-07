@@ -1,6 +1,6 @@
 import requests
 from fastapi import HTTPException
-from src.config import settings
+from config import settings
 
 
 class AuthService:
