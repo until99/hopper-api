@@ -9,9 +9,18 @@ class AirflowService:
     @staticmethod
     def get_auth() -> HTTPBasicAuth:
         """Retorna autenticação básica para o Airflow."""
-        username = settings.AIRFLOW_USERNAME or "admin"
-        password = settings.AIRFLOW_PASSWORD or "admin"
+        username = settings.AIRFLOW_USERNAME if settings.AIRFLOW_USERNAME else "admin"
+        password = settings.AIRFLOW_PASSWORD if settings.AIRFLOW_PASSWORD else "admin"
         return HTTPBasicAuth(username, password)
+    
+    @staticmethod
+    def get_session():
+        """Cria uma sessão com autenticação para reutilizar."""
+        session = requests.Session()
+        session.auth = AirflowService.get_auth()
+        session.headers.update({"Content-Type": "application/json"})
+        session.verify = False
+        return session
 
     @staticmethod
     def get_pipelines() -> dict:
@@ -23,13 +32,8 @@ class AirflowService:
         endpoint = f"{settings.AIRFLOW_URL}/api/v1/dags?limit=100"
         
         try:
-            response = requests.get(
-                endpoint,
-                auth=AirflowService.get_auth(),
-                headers={"Content-Type": "application/json"},
-                verify=False,
-                timeout=30
-            )
+            session = AirflowService.get_session()
+            response = session.get(endpoint, timeout=30)
 
             if response.status_code == 200:
                 dags = []
@@ -54,11 +58,17 @@ class AirflowService:
                     "total_returned": len(dags)
                 }
             else:
+                # Adiciona informações sobre a autenticação para debug
+                auth_info = {
+                    "username": settings.AIRFLOW_USERNAME if settings.AIRFLOW_USERNAME else "admin (default)",
+                    "password_set": "yes" if settings.AIRFLOW_PASSWORD else "using default"
+                }
                 return {
                     "error": "Failed to retrieve DAGs",
                     "status_code": response.status_code,
                     "response": response.text,
-                    "endpoint": endpoint
+                    "endpoint": endpoint,
+                    "auth_info": auth_info
                 }
         except Exception as e:
             return {
@@ -87,14 +97,8 @@ class AirflowService:
         }
 
         try:
-            response = requests.post(
-                endpoint,
-                auth=AirflowService.get_auth(),
-                headers={"Content-Type": "application/json"},
-                json=payload,
-                verify=False,
-                timeout=30
-            )
+            session = AirflowService.get_session()
+            response = session.post(endpoint, json=payload, timeout=30)
 
             if response.status_code not in [200, 201]:
                 raise HTTPException(
