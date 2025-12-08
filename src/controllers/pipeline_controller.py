@@ -49,6 +49,20 @@ def delete_pipeline_association(
     return AirflowService.delete_pipeline_association(dashboard_id)
 
 
+@router.post("/app/dashboards/{dashboard_id}/pipeline/refresh")
+def refresh_dashboard_pipeline(
+    dashboard_id: str, current_user: dict = Depends(verify_token)
+):
+    """Executa (refresh) a pipeline associada a um dashboard específico."""
+    # Primeiro busca a associação para obter o pipeline_id
+    association = AirflowService.get_dashboard_pipeline_association(dashboard_id)
+    if not association or "pipeline_id" not in association:
+        return {"error": "No pipeline associated with this dashboard"}
+    
+    pipeline_id = association["pipeline_id"]
+    return AirflowService.refresh_pipeline(pipeline_id)
+
+
 @router.post("/app/pipeline/{pipeline_id}/refresh")
 def refresh_pipeline_association(
     pipeline_id: str, current_user: dict = Depends(verify_token)
