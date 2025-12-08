@@ -40,7 +40,8 @@ class AirflowService:
     @staticmethod
     def get_pipelines() -> dict:
         """Retorna lista de pipelines (DAGs) do Airflow."""
-        endpoint = f"{settings.AIRFLOW_URL}/api/v2/dags"
+        # Remove o filtro only_active para retornar todas as DAGs
+        endpoint = f"{settings.AIRFLOW_URL}/api/v2/dags?only_active=false"
         airflow_token_response = AirflowService.acquire_bearer_token()
         access_token = airflow_token_response.get("access_token")
 
@@ -58,15 +59,18 @@ class AirflowService:
 
         if response.status_code == 200:
             dags = []
-            for dag in response.json().get("dags", []):
+            response_data = response.json()
+            for dag in response_data.get("dags", []):
                 dags.append(
                     {
                         "id": dag.get("dag_id"),
                         "description": dag.get("description"),
                         "timetable_description": dag.get("timetable_description"),
+                        "is_paused": dag.get("is_paused", False),
+                        "is_active": dag.get("is_active", True),
                     }
                 )
-            return {"dags": dags}
+            return {"dags": dags, "total_entries": response_data.get("total_entries", len(dags))}
         else:
             return {
                 "error": "Failed to retrieve DAGs",
@@ -90,8 +94,14 @@ class AirflowService:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {access_token}",
         }
+        
+        # Gera um dag_run_id único baseado no timestamp
+        dag_run_id = f"manual__{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+        
         payload = {
-            "logical_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "dag_run_id": dag_run_id,
+            "logical_date": datetime.now(timezone.utc).isoformat(),
+            "conf": {}
         }
 
         response = requests.post(endpoint, headers=headers, json=payload, verify=False)
@@ -102,7 +112,13 @@ class AirflowService:
                 detail=f"Failed to refresh pipeline: {response.text}",
             )
 
-        return {"message": "Pipeline refreshed successfully"}
+        result = response.json()
+        return {
+            "message": "Pipeline refreshed successfully",
+            "dag_run_id": result.get("dag_run_id"),
+            "logical_date": result.get("logical_date"),
+            "state": result.get("state")
+        }
 
     @staticmethod
     def get_all_pipeline_associations() -> dict:
