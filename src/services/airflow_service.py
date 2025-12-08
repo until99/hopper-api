@@ -1,108 +1,81 @@
 import requests
 from datetime import datetime, timezone
 from fastapi import HTTPException
+from requests.auth import HTTPBasicAuth
 from config import settings
 
 
 class AirflowService:
     @staticmethod
-    def acquire_bearer_token() -> dict:
-        """Adquire token de acesso do Airflow."""
-        if (
-            not settings.AIRFLOW_URL
-            or not settings.AIRFLOW_USERNAME
-            or not settings.AIRFLOW_PASSWORD
-        ):
-            return {"error": "Failed to retrieve Airflow credentials"}
-
-        token_url = f"{settings.AIRFLOW_URL}/auth/token"
-        payload = {
-            "username": settings.AIRFLOW_USERNAME,
-            "password": settings.AIRFLOW_PASSWORD,
-        }
-        response = requests.post(token_url, json=payload, verify=False)
-
-        if response.status_code in [200, 201]:
-            try:
-                return response.json()
-            except Exception:
-                return {
-                    "error": "Failed to parse Airflow token response",
-                    "details": response.text,
-                }
-        else:
-            return {
-                "error": "Failed to acquire Airflow token",
-                "status_code": response.status_code,
-                "response": response.text,
-            }
+    def get_auth() -> HTTPBasicAuth:
+        """Retorna autenticação básica para o Airflow."""
+        username = settings.AIRFLOW_USERNAME or "admin"
+        password = settings.AIRFLOW_PASSWORD or "admin"
+        return HTTPBasicAuth(username, password)
 
     @staticmethod
     def get_pipelines() -> dict:
         """Retorna lista de pipelines (DAGs) do Airflow."""
+        if not settings.AIRFLOW_URL:
+            return {"error": "AIRFLOW_URL not configured"}
+            
         # Busca todas as DAGs (paused e unpaused) com limite alto
         endpoint = f"{settings.AIRFLOW_URL}/api/v1/dags?limit=100"
-        airflow_token_response = AirflowService.acquire_bearer_token()
-        access_token = airflow_token_response.get("access_token")
+        
+        try:
+            response = requests.get(
+                endpoint,
+                auth=AirflowService.get_auth(),
+                headers={"Content-Type": "application/json"},
+                verify=False,
+                timeout=30
+            )
 
-        if not access_token:
+            if response.status_code == 200:
+                dags = []
+                response_data = response.json()
+                all_dags = response_data.get("dags", [])
+                
+                for dag in all_dags:
+                    dags.append(
+                        {
+                            "id": dag.get("dag_id"),
+                            "description": dag.get("description"),
+                            "timetable_description": dag.get("timetable_description"),
+                            "is_paused": dag.get("is_paused", False),
+                            "is_active": dag.get("is_active", True),
+                            "file_token": dag.get("file_token"),
+                        }
+                    )
+                
+                return {
+                    "dags": dags,
+                    "total_entries": response_data.get("total_entries", len(dags)),
+                    "total_returned": len(dags)
+                }
+            else:
+                return {
+                    "error": "Failed to retrieve DAGs",
+                    "status_code": response.status_code,
+                    "response": response.text,
+                    "endpoint": endpoint
+                }
+        except Exception as e:
             return {
-                "error": "Failed to acquire Airflow token",
-                "details": airflow_token_response,
-            }
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {access_token}",
-        }
-        response = requests.get(endpoint, headers=headers, verify=False)
-
-        if response.status_code == 200:
-            dags = []
-            response_data = response.json()
-            all_dags = response_data.get("dags", [])
-            
-            for dag in all_dags:
-                dags.append(
-                    {
-                        "id": dag.get("dag_id"),
-                        "description": dag.get("description"),
-                        "timetable_description": dag.get("timetable_description"),
-                        "is_paused": dag.get("is_paused", False),
-                        "is_active": dag.get("is_active", True),
-                        "file_token": dag.get("file_token"),
-                    }
-                )
-            
-            return {
-                "dags": dags,
-                "total_entries": response_data.get("total_entries", len(dags)),
-                "total_returned": len(dags)
-            }
-        else:
-            return {
-                "error": "Failed to retrieve DAGs",
-                "status_code": response.status_code,
-                "response": response.text,
+                "error": "Exception while retrieving DAGs",
+                "details": str(e),
                 "endpoint": endpoint
             }
 
     @staticmethod
     def refresh_pipeline(pipeline_id: str) -> dict:
         """Executa (refresh) uma pipeline específica."""
-        airflow_token_response = AirflowService.acquire_bearer_token()
-        access_token = airflow_token_response.get("access_token")
-
-        if not access_token:
+        if not settings.AIRFLOW_URL:
             raise HTTPException(
-                status_code=401, detail="Failed to acquire Airflow token"
+                status_code=500, detail="AIRFLOW_URL not configured"
             )
 
         endpoint = f"{settings.AIRFLOW_URL}/api/v1/dags/{pipeline_id}/dagRuns"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {access_token}",
-        }
         
         # Gera um dag_run_id único baseado no timestamp
         dag_run_id = f"manual__{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
@@ -113,21 +86,36 @@ class AirflowService:
             "conf": {}
         }
 
-        response = requests.post(endpoint, headers=headers, json=payload, verify=False)
-
-        if response.status_code not in [200, 201]:
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=f"Failed to refresh pipeline: {response.text}",
+        try:
+            response = requests.post(
+                endpoint,
+                auth=AirflowService.get_auth(),
+                headers={"Content-Type": "application/json"},
+                json=payload,
+                verify=False,
+                timeout=30
             )
 
-        result = response.json()
-        return {
-            "message": "Pipeline refreshed successfully",
-            "dag_run_id": result.get("dag_run_id"),
-            "logical_date": result.get("logical_date"),
-            "state": result.get("state")
-        }
+            if response.status_code not in [200, 201]:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Failed to refresh pipeline: {response.text}",
+                )
+
+            result = response.json()
+            return {
+                "message": "Pipeline refreshed successfully",
+                "dag_run_id": result.get("dag_run_id"),
+                "logical_date": result.get("logical_date"),
+                "state": result.get("state")
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Exception while refreshing pipeline: {str(e)}"
+            )
 
     @staticmethod
     def get_all_pipeline_associations() -> dict:
