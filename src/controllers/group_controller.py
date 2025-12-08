@@ -42,6 +42,17 @@ def update_hopper_group(
     return GroupService.update_group(group_id, update_data)
 
 
+@router.put("/groups/{group_id}")
+def update_hopper_group_put(
+    group_id: str,
+    group_data: IGroupUpdate,
+    current_user: dict = Depends(verify_token),
+):
+    """Atualiza os dados de um grupo (PUT)."""
+    update_data = group_data.model_dump(exclude_none=True)
+    return GroupService.update_group(group_id, update_data)
+
+
 @router.delete("/groups/{group_id}")
 def delete_hopper_group(group_id: str, current_user: dict = Depends(verify_token)):
     """Deleta um grupo."""
