@@ -1,4 +1,5 @@
 import requests
+import base64
 from datetime import datetime, timezone
 from fastapi import HTTPException
 from requests.auth import HTTPBasicAuth
@@ -14,11 +15,21 @@ class AirflowService:
         return HTTPBasicAuth(username, password)
     
     @staticmethod
+    def get_auth_header() -> dict:
+        """Retorna header de autenticação básica para o Airflow."""
+        username = settings.AIRFLOW_USERNAME if settings.AIRFLOW_USERNAME else "admin"
+        password = settings.AIRFLOW_PASSWORD if settings.AIRFLOW_PASSWORD else "admin"
+        credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+        return {
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/json"
+        }
+    
+    @staticmethod
     def get_session():
         """Cria uma sessão com autenticação para reutilizar."""
         session = requests.Session()
-        session.auth = AirflowService.get_auth()
-        session.headers.update({"Content-Type": "application/json"})
+        session.headers.update(AirflowService.get_auth_header())
         session.verify = False
         return session
 
