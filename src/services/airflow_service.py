@@ -40,8 +40,8 @@ class AirflowService:
     @staticmethod
     def get_pipelines() -> dict:
         """Retorna lista de pipelines (DAGs) do Airflow."""
-        # Remove o filtro only_active para retornar todas as DAGs
-        endpoint = f"{settings.AIRFLOW_URL}/api/v2/dags?only_active=false"
+        # Busca todas as DAGs (paused e unpaused) com limite alto
+        endpoint = f"{settings.AIRFLOW_URL}/api/v1/dags?limit=100"
         airflow_token_response = AirflowService.acquire_bearer_token()
         access_token = airflow_token_response.get("access_token")
 
@@ -60,7 +60,9 @@ class AirflowService:
         if response.status_code == 200:
             dags = []
             response_data = response.json()
-            for dag in response_data.get("dags", []):
+            all_dags = response_data.get("dags", [])
+            
+            for dag in all_dags:
                 dags.append(
                     {
                         "id": dag.get("dag_id"),
@@ -68,14 +70,21 @@ class AirflowService:
                         "timetable_description": dag.get("timetable_description"),
                         "is_paused": dag.get("is_paused", False),
                         "is_active": dag.get("is_active", True),
+                        "file_token": dag.get("file_token"),
                     }
                 )
-            return {"dags": dags, "total_entries": response_data.get("total_entries", len(dags))}
+            
+            return {
+                "dags": dags,
+                "total_entries": response_data.get("total_entries", len(dags)),
+                "total_returned": len(dags)
+            }
         else:
             return {
                 "error": "Failed to retrieve DAGs",
                 "status_code": response.status_code,
                 "response": response.text,
+                "endpoint": endpoint
             }
 
     @staticmethod
@@ -89,7 +98,7 @@ class AirflowService:
                 status_code=401, detail="Failed to acquire Airflow token"
             )
 
-        endpoint = f"{settings.AIRFLOW_URL}/api/v2/dags/{pipeline_id}/dagRuns"
+        endpoint = f"{settings.AIRFLOW_URL}/api/v1/dags/{pipeline_id}/dagRuns"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {access_token}",
@@ -147,16 +156,33 @@ class AirflowService:
     def get_dashboard_pipeline_association(dashboard_id: str) -> dict:
         """Retorna a associação de pipeline para um dashboard específico."""
         try:
-            response = requests.get(
+            url = (
                 settings.POCKETBASE_URL
-                + f"/api/collections/pipelines_dashboards/records?filter=dashboard_id='{dashboard_id}'",
+                + f"/api/collections/pipelines_dashboards/records?filter=(dashboard_id='{dashboard_id}')"
+            )
+            response = requests.get(
+                url,
                 headers={"Content-Type": "application/json"},
                 verify=False,
             ).json()
 
             if "items" not in response or len(response["items"]) == 0:
+                # Busca todas as associações para debug
+                all_records = requests.get(
+                    settings.POCKETBASE_URL
+                    + "/api/collections/pipelines_dashboards/records",
+                    headers={"Content-Type": "application/json"},
+                    verify=False,
+                ).json()
+                
                 raise HTTPException(
-                    status_code=404, detail="No pipeline found for this dashboard"
+                    status_code=404,
+                    detail={
+                        "message": "No pipeline found for this dashboard",
+                        "dashboard_id": dashboard_id,
+                        "total_associations": len(all_records.get("items", [])),
+                        "available_dashboards": [item.get("dashboard_id") for item in all_records.get("items", [])]
+                    }
                 )
 
             # Retorna o primeiro item encontrado

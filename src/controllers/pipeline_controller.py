@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from services.airflow_service import AirflowService
 from middlewares.auth import verify_token
 
@@ -54,13 +54,22 @@ def refresh_dashboard_pipeline(
     dashboard_id: str, current_user: dict = Depends(verify_token)
 ):
     """Executa (refresh) a pipeline associada a um dashboard específico."""
-    # Primeiro busca a associação para obter o pipeline_id
-    association = AirflowService.get_dashboard_pipeline_association(dashboard_id)
-    if not association or "pipeline_id" not in association:
-        return {"error": "No pipeline associated with this dashboard"}
-    
-    pipeline_id = association["pipeline_id"]
-    return AirflowService.refresh_pipeline(pipeline_id)
+    try:
+        # Primeiro busca a associação para obter o pipeline_id
+        association = AirflowService.get_dashboard_pipeline_association(dashboard_id)
+        
+        if not association or "pipeline_id" not in association:
+            raise HTTPException(
+                status_code=404,
+                detail="No pipeline associated with this dashboard"
+            )
+        
+        pipeline_id = association["pipeline_id"]
+        return AirflowService.refresh_pipeline(pipeline_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/app/pipeline/{pipeline_id}/refresh")
