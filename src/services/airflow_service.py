@@ -154,12 +154,13 @@ class AirflowService:
                 verify=False,
             ).json()
 
-            if "items" not in response:
+            if "items" not in response or len(response["items"]) == 0:
                 raise HTTPException(
                     status_code=404, detail="No pipeline found for this dashboard"
                 )
 
-            return response
+            # Retorna o primeiro item encontrado
+            return response["items"][0]
 
         except HTTPException:
             raise
@@ -217,18 +218,35 @@ class AirflowService:
     def delete_pipeline_association(dashboard_id: str) -> dict:
         """Deleta a associação de pipeline para um dashboard."""
         try:
-            response = requests.delete(
+            # Primeiro busca a associação para obter o ID do registro
+            search_response = requests.get(
                 settings.POCKETBASE_URL
                 + f"/api/collections/pipelines_dashboards/records?filter=dashboard_id='{dashboard_id}'",
                 headers={"Content-Type": "application/json"},
                 verify=False,
+            ).json()
+
+            if "items" not in search_response or len(search_response["items"]) == 0:
+                raise HTTPException(
+                    status_code=404, detail="No pipeline associated with this dashboard"
+                )
+
+            # Pega o ID do primeiro registro encontrado
+            record_id = search_response["items"][0]["id"]
+
+            # Deleta o registro usando o ID
+            delete_response = requests.delete(
+                settings.POCKETBASE_URL
+                + f"/api/collections/pipelines_dashboards/records/{record_id}",
+                headers={"Content-Type": "application/json"},
+                verify=False,
             )
 
-            if response.status_code == 204:
+            if delete_response.status_code == 204:
                 return {"message": "Pipeline association removed successfully"}
             else:
                 raise HTTPException(
-                    status_code=response.status_code,
+                    status_code=delete_response.status_code,
                     detail="Failed to remove pipeline association",
                 )
 
