@@ -34,6 +34,51 @@ class AirflowService:
         return session
 
     @staticmethod
+    def test_connection() -> dict:
+        """Testa a conexão com o Airflow."""
+        if not settings.AIRFLOW_URL:
+            return {"error": "AIRFLOW_URL not configured", "status": "failed"}
+        
+        try:
+            # Testa endpoint de health check do Airflow
+            health_endpoint = f"{settings.AIRFLOW_URL}/health"
+            session = AirflowService.get_session()
+            
+            # Teste sem autenticação primeiro (health geralmente não precisa)
+            response = requests.get(health_endpoint, verify=False, timeout=10)
+            
+            health_status = {
+                "health_endpoint": health_endpoint,
+                "health_status": response.status_code,
+                "health_accessible": response.status_code == 200
+            }
+            
+            # Agora testa o endpoint da API com autenticação
+            api_endpoint = f"{settings.AIRFLOW_URL}/api/v1/dags"
+            api_response = session.get(api_endpoint, timeout=10)
+            
+            auth_header = AirflowService.get_auth_header()
+            username = settings.AIRFLOW_USERNAME if settings.AIRFLOW_USERNAME else "admin"
+            
+            return {
+                "status": "success" if api_response.status_code == 200 else "failed",
+                "airflow_url": settings.AIRFLOW_URL,
+                "username": username,
+                "password_configured": "yes" if settings.AIRFLOW_PASSWORD else "no (using default)",
+                "api_endpoint_status": api_response.status_code,
+                "api_accessible": api_response.status_code == 200,
+                "api_response": api_response.text[:500] if api_response.status_code != 200 else "OK",
+                **health_status
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e),
+                "airflow_url": settings.AIRFLOW_URL
+            }
+
+    @staticmethod
     def get_pipelines() -> dict:
         """Retorna lista de pipelines (DAGs) do Airflow."""
         if not settings.AIRFLOW_URL:
@@ -42,9 +87,23 @@ class AirflowService:
         # Busca todas as DAGs (paused e unpaused) com limite alto
         endpoint = f"{settings.AIRFLOW_URL}/api/v1/dags?limit=100"
         
+        # Tenta primeiro sem parâmetros de query, caso o limit esteja causando problema
+        simple_endpoint = f"{settings.AIRFLOW_URL}/api/v1/dags"
+        
         try:
             session = AirflowService.get_session()
-            response = session.get(endpoint, timeout=30)
+            
+            # Tenta primeiro com o endpoint simples
+            response = session.get(simple_endpoint, timeout=30)
+            
+            # Se falhar com 401, tenta com credenciais diferentes
+            if response.status_code == 401:
+                # Tenta com usuário/senha em branco
+                session.headers.update({
+                    "Authorization": f"Basic {base64.b64encode(b':').decode()}",
+                    "Content-Type": "application/json"
+                })
+                response = session.get(simple_endpoint, timeout=30)
 
             if response.status_code == 200:
                 dags = []
@@ -71,15 +130,17 @@ class AirflowService:
             else:
                 # Adiciona informações sobre a autenticação para debug
                 auth_info = {
-                    "username": settings.AIRFLOW_USERNAME if settings.AIRFLOW_USERNAME else "admin (default)",
-                    "password_set": "yes" if settings.AIRFLOW_PASSWORD else "using default"
+                    "username": settings.AIRFLOW_USERNAME if settings.AIRFLOW_USERNAME else "admin",
+                    "password_set": "yes" if settings.AIRFLOW_PASSWORD else "using default",
+                    "url_tested": simple_endpoint
                 }
                 return {
                     "error": "Failed to retrieve DAGs",
                     "status_code": response.status_code,
                     "response": response.text,
                     "endpoint": endpoint,
-                    "auth_info": auth_info
+                    "auth_info": auth_info,
+                    "suggestion": "Verifique se o usuário 'admin' e senha 'admin' estão corretos no Airflow ou configure AIRFLOW_USERNAME e AIRFLOW_PASSWORD no .env"
                 }
         except Exception as e:
             return {

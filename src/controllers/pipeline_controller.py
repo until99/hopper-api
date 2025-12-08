@@ -5,6 +5,12 @@ from middlewares.auth import verify_token
 router = APIRouter(tags=["Pipelines"])
 
 
+@router.get("/pipelines/test-connection")
+def test_airflow_connection(current_user: dict = Depends(verify_token)):
+    """Testa a conexão com o Airflow."""
+    return AirflowService.test_connection()
+
+
 @router.get("/pipelines")
 def get_pipelines(current_user: dict = Depends(verify_token)):
     """Retorna lista de pipelines (DAGs) do Airflow."""
