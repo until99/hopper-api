@@ -22,7 +22,10 @@ def get_dashboard_pipeline_association(
     dashboard_id: str, current_user: dict = Depends(verify_token)
 ):
     """Retorna a associação de pipeline para um dashboard específico."""
-    return AirflowService.get_dashboard_pipeline_association(dashboard_id)
+    result = AirflowService.get_dashboard_pipeline_association(dashboard_id)
+    if result is None:
+        return {"pipeline_id": None, "dashboard_id": dashboard_id}
+    return result
 
 
 @router.get("/app/dashboards/{pipeline_id}/pipeline")
@@ -59,10 +62,10 @@ def refresh_dashboard_pipeline(
         association = AirflowService.get_dashboard_pipeline_association(dashboard_id)
         
         if not association or "pipeline_id" not in association:
-            raise HTTPException(
-                status_code=404,
-                detail="No pipeline associated with this dashboard"
-            )
+            return {
+                "error": "No pipeline associated with this dashboard",
+                "dashboard_id": dashboard_id
+            }
         
         pipeline_id = association["pipeline_id"]
         return AirflowService.refresh_pipeline(pipeline_id)

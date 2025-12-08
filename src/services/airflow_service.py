@@ -155,29 +155,12 @@ class AirflowService:
             ).json()
 
             if "items" not in response or len(response["items"]) == 0:
-                # Busca todas as associações para debug
-                all_records = requests.get(
-                    settings.POCKETBASE_URL
-                    + "/api/collections/pipelines_dashboards/records",
-                    headers={"Content-Type": "application/json"},
-                    verify=False,
-                ).json()
-                
-                raise HTTPException(
-                    status_code=404,
-                    detail={
-                        "message": "No pipeline found for this dashboard",
-                        "dashboard_id": dashboard_id,
-                        "total_associations": len(all_records.get("items", [])),
-                        "available_dashboards": [item.get("dashboard_id") for item in all_records.get("items", [])]
-                    }
-                )
+                # Retorna None ao invés de erro para não poluir logs
+                return None
 
             # Retorna o primeiro item encontrado
             return response["items"][0]
 
-        except HTTPException:
-            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
